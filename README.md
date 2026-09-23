@@ -34,3 +34,41 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+
+
+
+## AI tool: lookupPort
+
+The chat assistant (`/chat`) can call one server-side tool, `lookupPort`, defined in `app/lib/tools.js`.
+
+**Name:** `lookupPort`
+
+**Input schema** (Zod):
+
+{
+port: number // a port number, expected 1-65535
+}
+
+
+**Return shape (success):**
+
+{
+port: number,
+known: boolean, // whether we have curated data for this port
+service: string | null,
+riskLevel: "low" | "medium" | "high" | "critical" | "unknown",
+description: string,
+recommendation: string
+}
+
+
+**Failure case:** if `port` is outside the valid 1-65535 range, the tool throws an error instead of returning a result. This is a genuine input-validation failure — distinct from an unrecognized-but-valid port number, which is handled as a normal successful result with `known: false` and generic guidance.
+
+**Reference data:** a small curated set of 15 common ports lives in `app/lib/port-data.js` (FTP, SSH, Telnet, HTTP/HTTPS, SMB, RDP, etc.), each with a risk level, description, and recommendation.
+
+**UI rendering:** the tool's four lifecycle states are rendered distinctly in `app/components/ChatWindow.js`:
+- `input-streaming` — a pulsing skeleton, "Preparing port lookup…"
+- `input-available` — a spinner, "Looking up port {n}"
+- `output-available` — a real component (`PortResultCard`): a risk-colored card with the port, service, risk badge, description, and recommendation
+- `output-error` — a distinct red-bordered card with a warning icon and the actual error message, not a crash or blank state

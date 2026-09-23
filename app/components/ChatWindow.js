@@ -4,8 +4,6 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useEffect, useRef, useState } from "react";
 
-// Distance from the bottom (px) within which we consider the user "pinned"
-// to the latest message. Beyond this, we assume they scrolled up on purpose.
 const PIN_THRESHOLD = 80;
 
 export default function ChatWindow() {
@@ -20,9 +18,6 @@ export default function ChatWindow() {
 
   const isBusy = status === "submitted" || status === "streaming";
 
-  // Track whether the user is scrolled to (near) the bottom. If they scroll
-  // up mid-stream, we release the auto-scroll pin instead of yanking them
-  // back down on every new token.
   function handleScroll() {
     const el = scrollRef.current;
     if (!el) return;
@@ -32,7 +27,6 @@ export default function ChatWindow() {
     setShowJump(!pinned);
   }
 
-  // Auto-scroll on new content, but only while pinned to the bottom.
   useEffect(() => {
     if (isPinned && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -53,7 +47,7 @@ export default function ChatWindow() {
     if (!text || isBusy) return;
     sendMessage({ text });
     setInput("");
-    setIsPinned(true); // sending a message re-pins us to the bottom
+    setIsPinned(true);
   }
 
   return (
@@ -61,7 +55,7 @@ export default function ChatWindow() {
       <div className="chat__scroll" ref={scrollRef} onScroll={handleScroll}>
         {messages.length === 0 && (
           <p className="chat__empty">
-            Ask about a scan result — e.g. &ldquo;why is port 23 risky?&rdquo;
+            Ask about a scan result — e.g. &ldquo;why is port 23 risky?&rdquo; or &ldquo;what is port 445 used for?&rdquo;
           </p>
         )}
 
@@ -69,11 +63,6 @@ export default function ChatWindow() {
           <ChatMessage key={message.id} message={message} />
         ))}
 
-        {/* Thinking indicator: shown once a request is sent, until the first
-            token of the assistant's reply actually arrives. We check for an
-            in-progress assistant message with no text yet, so the indicator
-            hands off to real text the moment content exists, rather than
-            disappearing a frame early and causing a flicker. */}
         {status === "submitted" && <ThinkingIndicator />}
 
         {error && (
@@ -115,20 +104,85 @@ export default function ChatWindow() {
 
 function ChatMessage({ message }) {
   const isUser = message.role === "user";
-  // We intentionally render plain text, not parsed markdown. Streamed
-  // markdown can be mid-syntax (unclosed code fences, dangling asterisks)
-  // and render broken mid-stream — plain text sidesteps that entirely for
-  // this scope, at the cost of not rendering formatting like bold/lists.
-  const text = message.parts
-    .filter((part) => part.type === "text")
-    .map((part) => part.text)
-    .join("");
-
-  if (!text) return null;
 
   return (
-    <div className={isUser ? "chat__message chat__message--user" : "chat__message chat__message--assistant"}>
-      <p>{text}</p>
+    <div className={isUser ? "chat__turn chat__turn--user" : "chat__turn chat__turn--assistant"}>
+      {message.parts.map((part, i) => {
+        if (part.type === "text" && part.text) {
+          return (
+            <div key={i} className={isUser ? "chat__message chat__message--user" : "chat__message chat__message--assistant"}>
+              <p>{part.text}</p>
+            </div>
+          );
+        }
+        if (part.type === "tool-lookupPort") {
+          return <PortToolPart key={i} part={part} />;
+        }
+        return null;
+      })}
+    </div>
+  );
+}
+
+// Renders all four tool lifecycle states distinctly, per the assignment:
+// input-streaming, input-available, output-available, output-error.
+function PortToolPart({ part }) {
+  switch (part.state) {
+    case "input-streaming":
+      return (
+        <div className="tool-card tool-card--loading">
+          <div className="tool-card__skeleton" />
+          <p className="tool-card__label">Preparing port lookup…</p>
+        </div>
+      );
+
+    case "input-available":
+      return (
+        <div className="tool-card tool-card--loading">
+          <span className="tool-card__spinner" />
+          <p className="tool-card__label">
+            Looking up port {part.input?.port ?? "…"}
+          </p>
+        </div>
+      );
+
+    case "output-error":
+      return (
+        <div className="tool-card tool-card--error">
+          <span className="tool-card__error-icon">⚠</span>
+          <div>
+            <p className="tool-card__error-title">Lookup failed</p>
+            <p className="tool-card__error-text">{part.errorText}</p>
+          </div>
+        </div>
+      );
+
+    case "output-available":
+      return <PortResultCard result={part.output} />;
+
+    default:
+      return null;
+  }
+}
+
+// The actual rendered "result" — a real component, not a JSON dump or a
+// sentence of text.
+function PortResultCard({ result }) {
+  const { port, service, riskLevel, description, recommendation, known } = result;
+
+  return (
+    <div className={`port-card port-card--${riskLevel}`}>
+      <div className="port-card__header">
+        <span className="port-card__port">Port {port}</span>
+        <span className={`port-card__badge port-card__badge--${riskLevel}`}>
+          {riskLevel}
+        </span>
+      </div>
+      {known && <p className="port-card__service">{service}</p>}
+      <p className="port-card__desc">{description}</p>
+      <p className="port-card__rec">
+        <strong>Recommendation:</strong> {recommendation}
+      </p>
     </div>
   );
 }
